@@ -1,8 +1,8 @@
 - 👋 Hi, I’m @kyleburks5
 - 👀 I’m interested in data analytics
-- 🌱 I’m currently learning data analytics
-- 💞️ I’m looking to collaborate on ...
-- 📫 How to reach me ...
+- 🌱 I’m currently learning data analyst tools 
+- 📫 How to reach me:
+email: kyle.burks1@gmail.com
 
 <!---
 kyleburks5/kyleburks5 is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
