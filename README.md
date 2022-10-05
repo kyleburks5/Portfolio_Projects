@@ -1,7 +1,7 @@
 - 👋 Hi, I’m @kyleburks5
 - 👀 I’m interested in data analytics
 - 🌱 I’m currently learning data analyst tools 
-- Two repositories one that displays my courseera projects and personal projects
+- This is my personal project repository
 - 📫 How to reach me:
 email: kyle.burks1@gmail.com
 
