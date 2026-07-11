@@ -1,0 +1,236 @@
+// ============================================================
+//  ZIP REQUESTS DASHBOARD — ALL MEASURES
+//  Paste into DAX Query View. Each MEASURE shows a CodeLens
+//  "Update model: Add new measure" — or use "Update all".
+//  Home table = 'Sample Data' (change the table name before
+//  [Measure] if you keep measures on a dedicated calc table).
+//
+//  PREREQUISITES (create these first or some measures error):
+//   • A marked 'Date' table, active relationship to
+//     'Sample Data'[Day of Request date], and an INACTIVE
+//     relationship to 'Sample Data'[Day of Request completion date].
+//   • Calculated columns on 'Sample Data':
+//     Tier Group, Is Multi-Year, Stage Order, Channel Group,
+//     TCV Clean, Age Days.
+//
+//  Items marked "PROXY" substitute an available field for a
+//  concept with no clean source column — confirm before publish.
+// ============================================================
+DEFINE
+
+// ── BASE ─────────────────────────────────────────────
+MEASURE 'Sample Data'[Open Count] =
+    CALCULATE ( COUNTROWS ( 'Sample Data' ), 'Sample Data'[Request status] = "In - Progress" )
+
+// ── V1 · INCOMING (MTD) ──────────────────────────────
+MEASURE 'Sample Data'[Incoming MTD] =
+    CALCULATE ( COUNTROWS ( 'Sample Data' ), DATESMTD ( 'Date'[Date] ) )
+
+MEASURE 'Sample Data'[Incoming Prev Month] =
+    CALCULATE ( [Incoming MTD], PREVIOUSMONTH ( 'Date'[Date] ) )
+
+MEASURE 'Sample Data'[Incoming Delta] = [Incoming MTD] - [Incoming Prev Month]
+
+MEASURE 'Sample Data'[Incoming Delta %] =
+    DIVIDE ( [Incoming Delta], [Incoming Prev Month] )
+
+MEASURE 'Sample Data'[Incoming Delta Label] =
+    VAR d = [Incoming Delta]
+    RETURN
+        IF ( d >= 0, UNICHAR ( 9650 ) & " +", UNICHAR ( 9660 ) & " " )
+            & FORMAT ( d, "#,##0" )
+            & " (" & FORMAT ( [Incoming Delta %], "+0.0%;-0.0%" ) & ") vs last month"
+
+// ── V2 · URGENT ──────────────────────────────────────
+MEASURE 'Sample Data'[Urgent Open] =
+    CALCULATE ( [Open Count], 'Sample Data'[Priority] = "Urgent" )
+
+// PROXY: no SLA field yet. Swap to your SLA-breach rule when the SLA table exists.
+MEASURE 'Sample Data'[Urgent Breaching] =
+    CALCULATE ( [Urgent Open], 'Sample Data'[Due date] < 0 )
+
+MEASURE 'Sample Data'[Urgent Within SLA %] =
+    DIVIDE ( [Urgent Open] - [Urgent Breaching], [Urgent Open] )
+
+MEASURE 'Sample Data'[Urgent Sub Label] =
+    FORMAT ( [Urgent Breaching], "#,##0" ) & " breaching SLA · "
+        & FORMAT ( [Urgent Within SLA %], "0%" ) & " within SLA"
+
+// ── V3 · DUE FOR SIGNATURE ───────────────────────────
+MEASURE 'Sample Data'[Due For Signature] =
+    CALCULATE ( [Open Count], 'Sample Data'[Stage] = "5 Signature/Execution" )
+
+MEASURE 'Sample Data'[Due Sig T1] =
+    CALCULATE ( [Due For Signature], 'Sample Data'[Tier Group] = "T1" )
+
+MEASURE 'Sample Data'[Due Sig T2] =
+    CALCULATE ( [Due For Signature], 'Sample Data'[Tier Group] = "T2" )
+
+// ── V4 · MULTI-YEAR ──────────────────────────────────
+MEASURE 'Sample Data'[Multi-Year Open] =
+    CALCULATE ( [Open Count], 'Sample Data'[Is Multi-Year] = "Multi-year" )
+
+MEASURE 'Sample Data'[Multi-Year Prev Year] =
+    CALCULATE ( [Multi-Year Open], SAMEPERIODLASTYEAR ( 'Date'[Date] ) )
+
+MEASURE 'Sample Data'[Multi-Year Delta] =
+    [Multi-Year Open] - [Multi-Year Prev Year]
+
+MEASURE 'Sample Data'[Multi-Year Delta Label] =
+    VAR d = [Multi-Year Delta]
+    RETURN
+        IF ( d >= 0, UNICHAR ( 9650 ) & " +", UNICHAR ( 9660 ) & " " )
+            & FORMAT ( d, "#,##0" )
+            & " (" & FORMAT ( DIVIDE ( d, [Multi-Year Prev Year] ), "+0.0%;-0.0%" ) & ") vs last year"
+
+// ── V5 · VALUE IN PIPELINE ───────────────────────────
+MEASURE 'Sample Data'[Pipeline Value] =
+    CALCULATE ( SUM ( 'Sample Data'[TCV Clean] ), 'Sample Data'[Request status] = "In - Progress" )
+
+// PROXY for "stuck": open Tier 1, past due.
+MEASURE 'Sample Data'[Tier1 Stuck Value] =
+    CALCULATE (
+        SUM ( 'Sample Data'[TCV Clean] ),
+        'Sample Data'[Request status] = "In - Progress",
+        'Sample Data'[Overall Tier] = "Tier 1",
+        'Sample Data'[Due date] < 0
+    )
+
+MEASURE 'Sample Data'[Tier1 Stuck Label] =
+    FORMAT ( [Tier1 Stuck Value], "$#,##0.0,,""M""" ) & " Tier 1 stuck"
+
+// ── V6 · STAGE FLOW ──────────────────────────────────
+MEASURE 'Sample Data'[Stage Count] = [Open Count]
+
+MEASURE 'Sample Data'[Max Stage Count] =
+    MAXX ( ALL ( 'Sample Data'[Stage] ), [Open Count] )
+
+MEASURE 'Sample Data'[Stage Load %] =
+    DIVIDE ( [Stage Count], [Max Stage Count] )
+
+MEASURE 'Sample Data'[Avg Age Stage] =
+    AVERAGEX (
+        FILTER ( 'Sample Data', 'Sample Data'[Request status] = "In - Progress" ),
+        'Sample Data'[Age Days]
+    )
+
+MEASURE 'Sample Data'[Is Bottleneck] = IF ( [Avg Age Stage] > 20, 1, 0 )
+
+// ── V7 · VOLUME BY CATEGORY (Top 9 + Other) ──────────
+MEASURE 'Sample Data'[Category Rank] =
+    RANKX ( ALL ( 'Sample Data'[Category] ), [Open Count], , DESC )
+
+// ── V11–V13 · OPERATIONS KPIs ────────────────────────
+MEASURE 'Sample Data'[Due Window Wks] = 3   // bind to the Due Within slicer if desired
+
+MEASURE 'Sample Data'[Due 3wk] =
+    CALCULATE (
+        [Open Count],
+        'Sample Data'[Due date] >= 0,
+        'Sample Data'[Due date] <= [Due Window Wks] * 7
+    )
+
+MEASURE 'Sample Data'[Past Due Not Signed] =
+    CALCULATE ( [Open Count], 'Sample Data'[Due date] < 0, 'Sample Data'[Stage Order] < 5 )
+
+// PROXY: no "Executed / Zip-Completed" fields. DocuSign present + no completion date.
+MEASURE 'Sample Data'[Executed Not Completed] =
+    CALCULATE (
+        COUNTROWS ( 'Sample Data' ),
+        'Sample Data'[Contains Docusign] = "Docusign",
+        ISBLANK ( 'Sample Data'[Day of Request completion date] )
+    )
+
+// ── V21 · MULTI-YEAR REVIEWED & APPROVED ─────────────
+MEASURE 'Sample Data'[MY Total] = [Multi-Year Open]
+
+// PROXY: 'Status' = Approved within the multi-year open book.
+MEASURE 'Sample Data'[MY Approved] =
+    CALCULATE ( [Multi-Year Open], 'Sample Data'[Status] = "Approved" )
+
+MEASURE 'Sample Data'[MY Approved %] = DIVIDE ( [MY Approved], [MY Total] )
+
+MEASURE 'Sample Data'[MY Approved Label] =
+    FORMAT ( [MY Approved], "#,##0" ) & " of " & FORMAT ( [MY Total], "#,##0" )
+
+// ── V22 · TIER 1 WATCHLIST ───────────────────────────
+MEASURE 'Sample Data'[Due Soon Flag] =
+    IF ( SELECTEDVALUE ( 'Sample Data'[Due date] ) <= [Due Window Wks] * 7, 1, 0 )
+
+// ── V23 · OPEN CONTRACT TREND ────────────────────────
+MEASURE 'Sample Data'[New Requests] = COUNTROWS ( 'Sample Data' )
+
+MEASURE 'Sample Data'[Closed Requests] =
+    CALCULATE (
+        COUNTROWS ( 'Sample Data' ),
+        USERELATIONSHIP ( 'Date'[Date], 'Sample Data'[Day of Request completion date] ),
+        NOT ISBLANK ( 'Sample Data'[Day of Request completion date] )
+    )
+
+MEASURE 'Sample Data'[Net Change] = [New Requests] - [Closed Requests]
+
+MEASURE 'Sample Data'[Open Backlog] =
+    CALCULATE (
+        [New Requests] - [Closed Requests],
+        FILTER ( ALL ( 'Date' ), 'Date'[Date] <= MAX ( 'Date'[Date] ) )
+    )
+
+// ── V24 · MEDIAN END-TO-END AGE ──────────────────────
+MEASURE 'Sample Data'[Median Age] =
+    MEDIANX (
+        FILTER ( 'Sample Data', 'Sample Data'[Request status] = "In - Progress" ),
+        'Sample Data'[Age Days]
+    )
+
+MEASURE 'Sample Data'[Sample N] =
+    CALCULATE ( DISTINCTCOUNT ( 'Sample Data'[Request #] ), 'Sample Data'[Request status] = "In - Progress" )
+
+MEASURE 'Sample Data'[SLA Status Color] =
+    VAR m = [Median Age]
+    RETURN
+        SWITCH (
+            TRUE (),
+            [Sample N] < 5, "#9AA2B1",
+            m > 90 * 1.3,  "#B23A3A",
+            m > 90,        "#B07E27",
+                           "#2E7D4F"
+        )
+
+// ── V25 · STAGE BOTTLENECK ───────────────────────────
+// NOTE: no per-stage timestamps exist. Re-scoped to "median age of
+// requests CURRENTLY IN each stage." True stage TAT needs a history table.
+MEASURE 'Sample Data'[Stage Median Age] =
+    MEDIANX (
+        FILTER ( 'Sample Data', 'Sample Data'[Request status] = "In - Progress" ),
+        'Sample Data'[Age Days]
+    )
+
+// ── CHROME · HEADER TEXT ─────────────────────────────
+MEASURE 'Sample Data'[Last Refresh] =
+    VAR UtcNow = UTCNOW ()
+    VAR Yr = YEAR ( UtcNow )
+    VAR DstStart = DATE ( Yr, 3, 8 )  + MOD ( 8 - WEEKDAY ( DATE ( Yr, 3, 1 ), 1 ), 7 )  + TIME ( 7, 0, 0 )
+    VAR DstEnd   = DATE ( Yr, 11, 1 ) + MOD ( 8 - WEEKDAY ( DATE ( Yr, 11, 1 ), 1 ), 7 ) + TIME ( 6, 0, 0 )
+    VAR Offset   = IF ( UtcNow >= DstStart && UtcNow < DstEnd, -5, -6 )
+    VAR CentralNow = UtcNow + Offset / 24
+    RETURN
+        "Refreshed " & FORMAT ( CentralNow, "h:mm AM/PM" ) & " CT"
+            & UNICHAR ( 10 )
+            & "Data as of " & FORMAT ( MAX ( 'Sample Data'[Day of Request date] ), "MMM dd, yyyy" )
+
+MEASURE 'Sample Data'[Filter Summary] =
+    "Filtered: "
+        & COALESCE ( SELECTEDVALUE ( 'Sample Data'[Workflow] ), "All workflows" ) & " · "
+        & COALESCE ( SELECTEDVALUE ( 'Sample Data'[Stage] ), "All stages" ) & " · "
+        & COALESCE ( SELECTEDVALUE ( 'Sample Data'[Overall Tier] ), "All tiers" ) & " · "
+        & COALESCE ( SELECTEDVALUE ( 'Sample Data'[Is Multi-Year] ), "All terms" ) & " · "
+        & COALESCE ( SELECTEDVALUE ( 'Sample Data'[Channel Group] ), "All channels" )
+
+// ── sanity check so the script runs; delete after adding measures ──
+EVALUATE
+ROW (
+    "Open Count", [Open Count],
+    "Urgent Open", [Urgent Open],
+    "Pipeline Value", [Pipeline Value],
+    "Median Age", [Median Age]
+)
